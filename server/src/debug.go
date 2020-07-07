@@ -335,7 +335,8 @@ func fixReversedGames() {
 						// The game was supposed to end already!
 						logger.Debug("This game needs to be fixed in the database.")
 						badGameIDs = append(badGameIDs, id)
-						break
+						// We will repeat this game ID for every bad turn, which makes fixing it easier
+						continue
 					} else {
 						finished = true
 					}
