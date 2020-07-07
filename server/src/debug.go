@@ -281,3 +281,72 @@ func variantGetHighestID() int {
 	return highestID
 }
 */
+
+func fixReversedGames() {
+	// These games could have extra turns at the end of the game, bug #1193
+
+	// Lock the command mutex for the duration of the function to ensure synchronous execution
+	commandMutex.Lock()
+	defer commandMutex.Unlock()
+
+	logger.Debug("Fixing reversed games.")
+	badGameIDs := make([]int, 0)
+
+	// Get all game IDs
+	var ids []int
+	if v, err := models.Games.GetAllIDs(); err != nil {
+		logger.Fatal("Failed to get all of the game IDs:", err)
+		return
+	} else {
+		ids = v
+	}
+
+	s := newFakeSession(1, "Server")
+
+	for _, id := range ids {
+		// Get the options from the database
+		var options *Options
+		if v, err := models.Games.GetOptions(id); err != nil {
+			logger.Error("Failed to get the options from the database for game "+
+				strconv.Itoa(id)+":", err)
+			continue
+		} else {
+			options = v
+		}
+		if !variants[options.VariantName].HasReversedSuits() {
+			continue
+		}
+
+		logger.Debug("XXXXX GAME:", id, options.VariantName)
+		commandReplayCreate(s, &CommandData{
+			Source:     "id",
+			GameID:     id,
+			Visibility: "solo",
+		})
+
+		g := tables[newTableID].Game
+		finished := false
+		for _, action := range g.Actions {
+			textAction, ok := action.(ActionText)
+			if ok {
+				// This is a text action and we can ignore the others
+				if strings.HasPrefix(textAction.Text, "Players score") {
+					if finished {
+						// The game was supposed to end already!
+						logger.Debug("This game needs to be fixed in the database.")
+						badGameIDs = append(badGameIDs, id)
+						break
+					} else {
+						finished = true
+					}
+				}
+			}
+		}
+
+		commandTableUnattend(s, &CommandData{
+			TableID: newTableID,
+		})
+	}
+
+	logger.Debug(badGameIDs)
+}
